@@ -115,7 +115,36 @@ UNITS = {
     "LBXSCLSI": "mmol/L",
     "LBDSGBSI": "g/L",
 }
+import io
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill
+from openpyxl.utils import get_column_letter
 
+
+def build_template_xlsx(columns, example_row):
+    """Three header rows: name, units, NHANES code. Row 3 is what score() reads."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    head_fill = PatternFill("solid", fgColor="1F3864")
+
+    for j, v in enumerate(columns, start=1):
+        c = ws.cell(1, j, LABELS.get(v, v))
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = head_fill
+        c.alignment = Alignment(wrap_text=True, horizontal="center")
+
+        ws.cell(2, j, UNITS.get(v, "")).font = Font(italic=True, size=9)
+        ws.cell(3, j, v).font = Font(bold=True, size=9)
+        ws.cell(4, j, example_row[v])          # one example row
+        ws.column_dimensions[get_column_letter(j)].width = 15
+
+    ws.row_dimensions[1].height = 45
+    ws.freeze_panes = "B4"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 # --------------------------------------------------------------------------
 # Input layout
 # --------------------------------------------------------------------------
