@@ -296,7 +296,12 @@ with single:
 with batch:
     st.write("Upload a CSV with NHANES column names, one person per row. "
              "Age (RIDAGEEX) is in months; sex (RIAGENDR) is 1 for male, 2 for female.")
-    st.download_button("Download template", EXAMPLE.read_bytes(), "linage2_template.csv", "text/csv")
+        st.download_button(
+        "Download template (Excel)",
+        build_template_xlsx(pd.read_csv(EXAMPLE).columns.tolist(), example),
+        "linage2_template.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
     up = st.file_uploader("CSV file", type="csv")
     cot_b = st.radio("The LBXCOT column holds", ["Cotinine (ng/mL)", "Smoking intensity 0–3"],
                      horizontal=True, key="cot_batch")
