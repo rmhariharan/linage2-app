@@ -2,12 +2,16 @@
 LinAge2 biological age — Streamlit app.
 Run locally:   streamlit run app.py
 """
+import io
 from pathlib import Path
 
 import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from linage2.score import LinAge2
 
@@ -27,6 +31,10 @@ def load_clock():
 clock = load_clock()
 LABELS = clock.p["labels"]
 example = pd.read_csv(EXAMPLE).iloc[1]          # a 72-year-old man from NHANES 99/00
+
+# --------------------------------------------------------------------------
+# Units and answer coding, for the downloadable template
+# --------------------------------------------------------------------------
 UNITS = {
     "SEQN": "—",
     "RIAGENDR": "1=Male, 2=Female",
@@ -56,13 +64,13 @@ UNITS = {
     "OSQ010B": "1=Yes, 2=No",
     "OSQ010C": "1=Yes, 2=No",
     "OSQ060": "1=Yes, 2=No",
-    "PFQ056": "1=Yes, 2=No",   # VERIFY
+    "PFQ056": "1=Yes, 2=No",            # VERIFY
     "BPXPLS": "beats/min",
     "BPXSAR": "mmHg",
     "BPXDAR": "mmHg",
     "BMXBMI": "kg/m²",
-    "URXUMASI": "mg/L",   # VERIFY
-    "URXUCRSI": "µmol/L",   # VERIFY
+    "URXUMASI": "mg/L",                 # VERIFY
+    "URXUCRSI": "µmol/L",               # VERIFY
     "LBDIRNSI": "µmol/L",
     "LBDTIBSI": "µmol/L",
     "LBXPCT": "%",
@@ -88,13 +96,13 @@ UNITS = {
     "LBXHCT": "%",
     "LBXMCVSI": "fL",
     "LBXMCHSI": "pg",
-    "LBXMC": "g/dL",   # VERIFY
+    "LBXMC": "g/dL",                    # VERIFY
     "LBXRDW": "%",
     "LBXPLTSI": "1000 cells/µL",
     "LBXMPSI": "fL",
-    "LBXCRP": "mg/dL",   # VERIFY
+    "LBXCRP": "mg/dL",                  # VERIFY
     "LBXGH": "%",
-    "SSBNP": "pg/mL",   # VERIFY
+    "SSBNP": "pg/mL",                   # VERIFY
     "LBDSALSI": "g/L",
     "LBXSATSI": "U/L",
     "LBXSASSI": "U/L",
@@ -115,36 +123,79 @@ UNITS = {
     "LBXSCLSI": "mmol/L",
     "LBDSGBSI": "g/L",
 }
-import io
-from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill
-from openpyxl.utils import get_column_letter
 
 
+@st.cache_data
 def build_template_xlsx(columns, example_row):
     """Three header rows: name, units, NHANES code. Row 3 is what score() reads."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Data"
     head_fill = PatternFill("solid", fgColor="1F3864")
+    unit_fill = PatternFill("solid", fgColor="D9E2F3")
+    code_fill = PatternFill("solid", fgColor="F2F2F2")
+    ex_fill = PatternFill("solid", fgColor="FFF2CC")
 
     for j, v in enumerate(columns, start=1):
         c = ws.cell(1, j, LABELS.get(v, v))
-        c.font = Font(bold=True, color="FFFFFF")
+        c.font = Font(bold=True, color="FFFFFF", size=10)
         c.fill = head_fill
-        c.alignment = Alignment(wrap_text=True, horizontal="center")
+        c.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
 
-        ws.cell(2, j, UNITS.get(v, "")).font = Font(italic=True, size=9)
-        ws.cell(3, j, v).font = Font(bold=True, size=9)
-        ws.cell(4, j, example_row[v])          # one example row
+        u = ws.cell(2, j, UNITS.get(v, ""))
+        u.font = Font(italic=True, size=9, color="1F3864")
+        u.fill = unit_fill
+        u.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
+
+        k = ws.cell(3, j, v)
+        k.font = Font(bold=True, size=9)
+        k.fill = code_fill
+        k.alignment = Alignment(horizontal="center")
+
+        e = ws.cell(4, j, example_row[v])        # one example row
+        e.fill = ex_fill
+        e.alignment = Alignment(horizontal="center")
+
         ws.column_dimensions[get_column_letter(j)].width = 15
 
     ws.row_dimensions[1].height = 45
+    ws.row_dimensions[2].height = 28
     ws.freeze_panes = "B4"
+
+    rd = wb.create_sheet("README")
+    for i, line in enumerate([
+        "LinAge2 — data entry template",
+        "",
+        "Row 1 is the biomarker name, row 2 the units or answer coding, row 3 the NHANES "
+        "variable code. Row 3 is the row the app reads, so do not edit or reorder it.",
+        "",
+        "Enter one person per row, starting at row 4. The shaded row 4 is an EXAMPLE: "
+        "delete it before entering real data.",
+        "",
+        "Units matter. Many columns are in SI units. Convert before entering.",
+        "",
+        "For yes/no questions NHANES uses 1 = Yes and 2 = No, the reverse of what most "
+        "people assume.",
+        "",
+        "Leave a cell blank if a value is missing. Do not enter 0 or a placeholder.",
+    ], start=1):
+        cell = rd.cell(i, 1, line)
+        cell.font = Font(bold=(i == 1), size=12 if i == 1 else 10)
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+    rd.column_dimensions["A"].width = 100
 
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def read_uploaded(upload):
+    """Accept the Excel template (3 header rows) or a plain CSV."""
+    if upload.name.lower().endswith((".xlsx", ".xlsm")):
+        return pd.read_excel(upload, header=2)       # row 3 holds the NHANES codes
+    return pd.read_csv(upload)
+
+
 # --------------------------------------------------------------------------
 # Input layout
 # --------------------------------------------------------------------------
@@ -281,7 +332,7 @@ st.write("LinAge2 estimates biological age from routine clinical labs, vitals an
          "health questionnaire. It was trained on NHANES 1999–2000 mortality follow-up and "
          "tested on NHANES 2001–2002.")
 
-single, batch = st.tabs(["One person", "Many people (CSV)"])
+single, batch = st.tabs(["One person", "Many people (file)"])
 
 with single:
     df, cot = single_form()
@@ -294,20 +345,21 @@ with single:
             st.error(f"Could not calculate LinAge2: {e}")
 
 with batch:
-    st.write("Upload a CSV with NHANES column names, one person per row. "
-             "Age (RIDAGEEX) is in months; sex (RIAGENDR) is 1 for male, 2 for female.")
-        st.download_button(
+    st.write("Download the template, fill in one person per row, then upload it. "
+             "The template lists each biomarker with its units. "
+             "A plain CSV with NHANES column names also works.")
+    st.download_button(
         "Download template (Excel)",
         build_template_xlsx(pd.read_csv(EXAMPLE).columns.tolist(), example),
         "linage2_template.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-    up = st.file_uploader("CSV file", type="csv")
-    cot_b = st.radio("The LBXCOT column holds", ["Cotinine (ng/mL)", "Smoking intensity 0–3"],
+    up = st.file_uploader("Excel or CSV file", type=["xlsx", "csv"])
+    cot_b = st.radio("The cotinine column holds", ["Cotinine (ng/mL)", "Smoking intensity 0–3"],
                      horizontal=True, key="cot_batch")
     if up is not None:
         try:
-            data = pd.read_csv(up)
+            data = read_uploaded(up)
             res = clock.score(data, cotinine="C" if cot_b.startswith("Cot") else "S")
             show = res[["SEQN", "chronAge", "linAge2", "bioAge_del"]]
             st.dataframe(show, use_container_width=True, hide_index=True)
